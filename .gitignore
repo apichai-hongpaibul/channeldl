@@ -216,3 +216,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project state files (generated at runtime)
+.yt_audio_dl_state.json
+.yt_audio_dl_archive.txt
+.yt_audio_dl_errors.log
+
+# Downloaded audio
+*.mp3
