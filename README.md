@@ -28,7 +28,7 @@ Concurrent YouTube channel → MP3 downloader with live progress UI.
 ## Install
 
 ```bash
-pip install yt-dlp rich
+uv add -r requirements.txt
 
 # ffmpeg required for MP3 conversion
 sudo apt install ffmpeg        # Ubuntu/Debian
@@ -42,25 +42,25 @@ brew install ffmpeg            # macOS
 
 ```bash
 # Download all audio from a channel
-python yt_audio_dl.py @mkbhd
+uv run yt_audio_dl.py @mkbhd
 
 # List videos first (shows ✓ next to already-downloaded)
-python yt_audio_dl.py --list @mkbhd
+uv run yt_audio_dl.py --list @mkbhd
 
 # Custom output folder
-python yt_audio_dl.py --output ~/Music/MKBHD @mkbhd
+uv run yt_audio_dl.py --output ~/Music/MKBHD @mkbhd
 
 # Fewer workers (quieter on YouTube's rate limits)
-python yt_audio_dl.py --workers 3 @mkbhd
+uv run yt_audio_dl.py --workers 3 @mkbhd
 
 # Higher quality
-python yt_audio_dl.py --quality 320 @mkbhd
+uv run yt_audio_dl.py --quality 320 @mkbhd
 
 # Clear history and re-download everything
-python yt_audio_dl.py --reset @mkbhd
+uv run yt_audio_dl.py --reset @mkbhd
 
 # Full URL also works
-python yt_audio_dl.py https://www.youtube.com/@mkbhd/videos
+uv run yt_audio_dl.py https://www.youtube.com/@mkbhd/videos
 ```
 
 ---

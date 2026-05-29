@@ -16,8 +16,10 @@ Concurrent YouTube channel → MP3 downloader with live progress UI.
 ## Run
 
 ```bash
-python yt_audio_dl.py @channelname
+uv run yt_audio_dl.py @channelname
 ```
+
+Setup first: `uv add -r requirements.txt`
 
 Flags: `--list`, `--output DIR`, `--workers N`, `--quality KBPS`, `--reset`.
 

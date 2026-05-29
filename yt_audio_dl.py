@@ -26,6 +26,7 @@ import re
 import sys
 import threading
 import time
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -159,9 +160,73 @@ def resolve_channel_url(raw: str) -> str:
     return f"https://www.youtube.com/{handle}/videos"
 
 
+def channel_name_from_url(url: str) -> str:
+    match = re.search(r'youtube\.com/@([^/?#]+)', url)
+    if match:
+        return match.group(1)
+    match = re.search(r'youtube\.com/(?:c/|user/|channel/)?([^/?#]+)', url)
+    if match:
+        return match.group(1)
+    return "channel"
+
+
+def _is_word(ch: str) -> bool:
+    cat = unicodedata.category(ch)
+    return cat.startswith(('L', 'N')) or ch == '_'
+
+
 def sanitize(name: str) -> str:
-    name = re.sub(r'[\\/*?:"<>|]', "", name)
-    return name.strip(". ") or "untitled"
+    parts = [p.strip() for p in name.split('|') if p.strip()]
+
+    episode_pattern = re.compile(
+        r'^(ตอนที่|chapter|episode|part|ชุดเต็ม)\s*\d*(?:\s*[-–]\s*\d+)?$',
+        re.IGNORECASE,
+    )
+
+    if len(parts) >= 2:
+        episodes = [p for p in parts if episode_pattern.search(p)]
+        titles = [p for p in parts if not episode_pattern.search(p)]
+        if episodes:
+            name = ' '.join(titles + episodes)
+
+    name = re.sub(r'(\d+)\s*[-–]\s*(\d+)', r'\1-\2', name)
+
+    result = []
+    for i, ch in enumerate(name):
+        cat = unicodedata.category(ch)
+        if cat.startswith(('L', 'N')):
+            result.append(ch)
+        elif cat in ('Mn', 'Mc'):
+            result.append(ch)
+        elif ch in ('-', '–', '_'):
+            result.append(ch)
+        elif ch == ' ' or cat == 'Zs':
+            result.append(' ')
+        else:
+            prev_word = bool(result) and _is_word(result[-1])
+            next_word = (
+                i + 1 < len(name) and _is_word(name[i + 1])
+            )
+            if prev_word and next_word:
+                result.append('_')
+            elif prev_word:
+                result.append(' ')
+
+    name = ''.join(result)
+    name = re.sub(r'\s+', ' ', name).strip()
+    name = re.sub(r'_+', '_', name)
+    name = re.sub(r'[\\/*?:"<>|]', '', name)
+
+    MAX_LENGTH = 100
+    if len(name) > MAX_LENGTH:
+        truncated = name[:MAX_LENGTH]
+        last_space = truncated.rfind(' ')
+        if last_space > 20:
+            name = truncated[:last_space]
+        else:
+            name = truncated
+
+    return name.strip('. ') or 'untitled'
 
 
 def fetch_video_list(channel_url: str) -> list[dict]:
@@ -447,12 +512,13 @@ examples:
 
     args = parser.parse_args()
 
+    channel_url = resolve_channel_url(args.channel)
+
     # Output dir
     if args.output:
         output_dir = Path(args.output)
     else:
-        name = args.channel.lstrip("@").split("/")[0]
-        output_dir = Path(re.sub(r"[^\w\-]", "_", name))
+        output_dir = Path(re.sub(r"[^\w\-]", "_", channel_name_from_url(channel_url)))
     output_dir.mkdir(parents=True, exist_ok=True)
 
     store   = StateStore(output_dir)
@@ -464,8 +530,6 @@ examples:
         if archive.exists():
             archive.unlink()
         console.print("[yellow]↺[/]  History cleared.")
-
-    channel_url = resolve_channel_url(args.channel)
     console.print(f"\n[grey50]Fetching video list…[/]", end="\r")
     videos = fetch_video_list(channel_url)
     console.print(f"[grey50]                       [/]", end="\r")
