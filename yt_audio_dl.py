@@ -369,7 +369,7 @@ def _row_label(task: DownloadTask, final: bool = False) -> str:
 def build_progress() -> Progress:
     return Progress(
         SpinnerColumn(spinner_name="dots", style="cyan"),
-        TextColumn("{task.description}", no_wrap=True),
+        TextColumn("{task.description}"),
         BarColumn(bar_width=28, style="cyan", complete_style="green", finished_style="green"),
         TextColumn("[progress.percentage]{task.percentage:>3.0f}%", style="grey62"),
         TimeElapsedColumn(),

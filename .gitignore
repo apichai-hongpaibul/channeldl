@@ -222,5 +222,15 @@ __marimo__/
 .yt_audio_dl_archive.txt
 .yt_audio_dl_errors.log
 
+# macOS
+.DS_Store
+
 # Downloaded audio
 *.mp3
+*.webm
+*.m4a
+*.ogg
+*.wav
+*.flac
+*.aac
+*.opus
