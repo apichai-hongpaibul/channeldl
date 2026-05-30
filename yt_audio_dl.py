@@ -57,6 +57,7 @@ try:
     from rich.table import Table
     from rich.text import Text
     from rich import box
+    from rich.group import Group
 except ImportError:
     _missing.append("rich")
 
@@ -314,6 +315,9 @@ def worker(
             task.status = Status.DONE
             task.output_path = str(expected)
             store.mark_done(task)
+            webm_file = output_dir / f"{safe}.webm"
+            if webm_file.exists():
+                webm_file.unlink(missing_ok=True)
         else:
             # yt-dlp archive skip → already done on disk
             task.status = Status.SKIPPED
@@ -366,6 +370,55 @@ def _row_label(task: DownloadTask, final: bool = False) -> str:
     return f"[{color}]{icon}[/] {title}{speed}"
 
 
+def _cleanup_orphan_webm(output_dir: Path) -> None:
+    for webm in sorted(output_dir.glob("*.webm")):
+        if webm.with_suffix(".mp3").exists():
+            webm.unlink(missing_ok=True)
+
+
+def _get_output_stats(output_dir: Path) -> tuple[int, int]:
+    mp3s = list(output_dir.glob("*.mp3"))
+    total = sum(f.stat().st_size for f in mp3s)
+    return len(mp3s), total
+
+
+_MAX_ROWS = 22
+
+
+def _trim_progress(progress: Progress, tasks: list[DownloadTask]) -> None:
+    visible = sum(1 for t in tasks if t.rich_task_id is not None)
+    if visible <= _MAX_ROWS:
+        return
+    for t in tasks:
+        if t.rich_task_id is None:
+            continue
+        if t.status in (Status.DONE, Status.SKIPPED, Status.FAILED):
+            try:
+                progress.remove_task(t.rich_task_id)
+                t.rich_task_id = None
+                visible -= 1
+                if visible <= _MAX_ROWS:
+                    return
+            except Exception:
+                pass
+
+
+def _make_footer(output_dir: Path, done_count: int = 0, total_videos: int = 0) -> Table:
+    count, size = _get_output_stats(output_dir)
+    size_str = (
+        f"{size / (1024**3):.1f} GB"
+        if size > 1024**3
+        else f"{size / (1024**2):.0f} MB"
+    )
+    grid = Table.grid(padding=(0, 2))
+    grid.add_column(no_wrap=True)
+    text = f"[grey50]{count} files  {size_str}[/]"
+    if total_videos > 0:
+        text += f"   [grey50]|[/]   [grey62]{done_count} / {total_videos} videos[/]"
+    grid.add_row(text)
+    return grid
+
+
 def build_progress() -> Progress:
     return Progress(
         SpinnerColumn(spinner_name="dots", style="cyan"),
@@ -379,14 +432,17 @@ def build_progress() -> Progress:
     )
 
 
-def build_summary(tasks: list[DownloadTask], elapsed: float, total: int) -> Table:
+def build_summary(tasks: list[DownloadTask], elapsed: float, total: int, output_dir: Path) -> Table:
     done    = sum(1 for t in tasks if t.status == Status.DONE)
     skipped = sum(1 for t in tasks if t.status == Status.SKIPPED)
     failed  = sum(1 for t in tasks if t.status == Status.FAILED)
     active  = sum(1 for t in tasks if t.status == Status.ACTIVE)
     queued  = sum(1 for t in tasks if t.status == Status.QUEUED)
+    count, size = _get_output_stats(output_dir)
+    size_str = f"{size / (1024**3):.1f} GB" if size > 1024**3 else f"{size / (1024**2):.0f} MB"
 
     grid = Table.grid(padding=(0, 2))
+    grid.add_column(no_wrap=True)
     grid.add_column(no_wrap=True)
     grid.add_column(no_wrap=True)
     grid.add_column(no_wrap=True)
@@ -398,6 +454,7 @@ def build_summary(tasks: list[DownloadTask], elapsed: float, total: int) -> Tabl
         f"[cyan]⬇ {active} active[/]",
         f"[grey50]· {queued} queued[/]",
         f"[red]✗ {failed} failed[/]" if failed else "[grey30]✗ 0 failed[/]",
+        f"[grey50]{count} total  {size_str}[/]",
     )
     return grid
 
@@ -426,6 +483,8 @@ def cmd_download(
     quality: str = DEFAULT_QUALITY,
 ) -> None:
     archive_path = output_dir / ARCHIVE_FILE
+
+    _cleanup_orphan_webm(output_dir)
 
     # Partition
     pending_vids = [v for v in videos if not store.is_done(v["id"])]
@@ -464,20 +523,30 @@ def cmd_download(
 
     start = time.monotonic()
 
-    with Live(progress, console=console, refresh_per_second=10):
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {
-                pool.submit(worker, t, output_dir, archive_path, progress, store, err_log, quality): t
-                for t in tasks
-            }
-            for _ in as_completed(futures):
-                pass   # progress updates happen inside worker via hooks
+    display = Group(progress, _make_footer(output_dir, store.done_count, len(videos)))
+    try:
+        with Live(display, console=console, refresh_per_second=10):
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = {
+                    pool.submit(worker, t, output_dir, archive_path, progress, store, err_log, quality): t
+                    for t in tasks
+                }
+                for _ in as_completed(futures):
+                    _trim_progress(progress, tasks)
+                    display.renderables = (progress, _make_footer(output_dir, store.done_count, len(videos)))
+    except KeyboardInterrupt:
+        console.print("\n[yellow]⚠[/]  Interrupted. Cleaning up partial files…")
+        for webm in sorted(output_dir.glob("*.webm")):
+            webm.unlink(missing_ok=True)
+        sys.exit(130)
 
     elapsed = time.monotonic() - start
 
+    _cleanup_orphan_webm(output_dir)
+
     # Final summary line
     console.print()
-    console.print(build_summary(tasks, elapsed, len(videos)))
+    console.print(build_summary(tasks, elapsed, len(videos), output_dir))
     console.print(
         f"\n  [grey50]elapsed {elapsed:.1f}s   "
         f"output {output_dir.resolve()}[/]\n"
